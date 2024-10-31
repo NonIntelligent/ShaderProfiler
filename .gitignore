@@ -16,6 +16,10 @@
 # Mono auto generated files
 mono_crash.*
 
+# User Config
+!*.dll
+*.exe
+
 # Build results
 [Dd]ebug/
 [Dd]ebugPublic/
@@ -23,6 +27,8 @@ mono_crash.*
 [Rr]eleases/
 x64/
 x86/
+Win32/
+intermediates/
 [Aa][Rr][Mm]/
 [Aa][Rr][Mm]64/
 bld/
