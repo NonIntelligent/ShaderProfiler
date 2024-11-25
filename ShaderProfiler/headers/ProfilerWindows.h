@@ -6,9 +6,9 @@
 struct IDXGISwapChain;
 
 struct Window {
-	IDXGISwapChain* swapChain;
 	HWND handle;
 	std::wstring className;
+	int width, height;
 };
 
 class WindowManager {
@@ -19,9 +19,8 @@ public:
 	WindowManager(HINSTANCE appInstance) : _instance(appInstance) {}
 	~WindowManager();
 
-	void viewWindow(int);
-	void hideWindow();
-	void updateWindows();
+	void showWindow(HWND window, int nShowCmd);
+	void hideWindow(HWND window);
 	HWND createMainWindow(int nShowCmd);
 	HWND createOverlay();
 

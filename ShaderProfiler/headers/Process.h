@@ -26,5 +26,5 @@ struct Process {
 		deleted++;
 	}
 
-	bool isAlive();
+	bool isAlive() const;
 };

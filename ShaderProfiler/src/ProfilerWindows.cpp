@@ -18,13 +18,12 @@ WindowManager::~WindowManager() {
 	}
 }
 
-void WindowManager::updateWindows() {
-	auto it = windows.begin();
+void WindowManager::showWindow(HWND window, int nShowCmd) {
+	ShowWindow(window, nShowCmd);
+}
 
-	while (it != windows.end()) {
-		UpdateWindow(it->second);
-		it++;
-	}
+void WindowManager::hideWindow(HWND window) {
+	ShowWindow(window, 0);
 }
 
 HWND WindowManager::createMainWindow(int nShowCmd) {
@@ -51,7 +50,7 @@ HWND WindowManager::createMainWindow(int nShowCmd) {
 		L"Application",
 		WS_OVERLAPPEDWINDOW,
 		0, 0,
-		width, height,
+		width / 3, height / 3,
 		nullptr,
 		nullptr,
 		_instance,
@@ -158,6 +157,7 @@ LRESULT CALLBACK window_procedure(HWND window, UINT msg, WPARAM wParam, LPARAM l
 		return true;
 	}
 
+	// message sent by the DestroyWindow function or when clicking the close window button
 	if (msg == WM_DESTROY) {
 		PostQuitMessage(0);
 		return true;

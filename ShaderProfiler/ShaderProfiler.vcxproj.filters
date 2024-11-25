@@ -68,5 +68,8 @@
     <ClInclude Include="headers\Renderer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="headers\Graphics.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

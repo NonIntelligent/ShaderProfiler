@@ -5,6 +5,8 @@
 #include <imgui_impl_win32.h>
 #include <imgui_impl_dx11.h>
 
+#include <process.h>
+
 // Features supported
 constexpr D3D_FEATURE_LEVEL levels[2]{
 	D3D_FEATURE_LEVEL_11_0,
@@ -25,51 +27,27 @@ Renderer::Renderer() {
 		&_deviceContext
 	);
 
-	IMGUI_CHECKVERSION();
-	ImGui::CreateContext();
-	ImGui::StyleColorsDark();
-	ImGuiIO& io = ImGui::GetIO();
-	io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-	io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
-
-	ImGui::StyleColorsDark();
-
-	// When viewports are enabled we tweak WindowRounding/WindowBg so platform windows can look identical to regular ones.
-	ImGuiStyle& style = ImGui::GetStyle();
-	if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
-		style.WindowRounding = 0.0f;
-		style.Colors[ImGuiCol_WindowBg].w = 1.0f;
-	}
-
-	_factory = nullptr;
-
 	CreateDXGIFactory(__uuidof(IDXGIFactory), (void**)&_factory);
-
-	ImGui_ImplDX11_Init(_device, _deviceContext);
 }
 
 Renderer::~Renderer() {
-	ImGui_ImplDX11_Shutdown();
-	ImGui_ImplWin32_Shutdown();
-	ImGui::DestroyContext();
-
-	for (auto& [sc, target] : renderMaps) {
-		sc->Release();
-		target->Release();
+	for (auto& [sc, graphics] : graphicsMap) {
+		graphics.swapChain->Release();
+		graphics.target->Release();
+		ImGui::SetCurrentContext(graphics.context);
+		ImGui_ImplDX11_Shutdown();
+		ImGui_ImplWin32_Shutdown();
+		ImGui::DestroyContext(graphics.context);
 	}
+
+	if (_factory) _factory->Release();
 
 	if (_deviceContext) _deviceContext->Release();
 
 	if (_device) _device->Release();
-
-	_factory->Release();
 }
 
-void Renderer::createSwapChainAndTarget(HWND window) {
-	// TODO Generate error exception
-	if (!_device) {
-		return;
-	}
+void Renderer::createGraphicsContext(HWND window) {
 
 	// Swap chain config and render context for the window
 	DXGI_SWAP_CHAIN_DESC desc{};
@@ -86,23 +64,34 @@ void Renderer::createSwapChainAndTarget(HWND window) {
 	desc.Flags = 0U;
 
 	// Create buffers and targets for the window
-	IDXGISwapChain* swapChain = nullptr;
-	ID3D11RenderTargetView* target = nullptr;
+	Graphics graphics;
 	ID3D11Texture2D* backBuffer = nullptr;
 
-	_factory->CreateSwapChain(_device, &desc, &swapChain);
-	swapChain->GetBuffer(0U, IID_PPV_ARGS(&backBuffer));
-	_device->CreateRenderTargetView(backBuffer, nullptr, &target);
+	_factory->CreateSwapChain(_device, &desc, &graphics.swapChain);
+	graphics.swapChain->GetBuffer(0U, IID_PPV_ARGS(&backBuffer));
+
+	if (backBuffer) {
+		_device->CreateRenderTargetView(backBuffer, nullptr, &graphics.target);
+	}
 
 	backBuffer->Release();
 
+	graphics.context = ImGui::CreateContext();
+	ImGui::StyleColorsDark();
+	ImGuiIO& io = ImGui::GetIO();
+	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+
+	ImGui::SetCurrentContext(graphics.context);
+	initContext(window);
+
 	// Assign mappings for window rendering
-	windowMap[window] = swapChain;
-	renderMaps[swapChain] = target;
+	graphicsMap[window] = graphics;
+
 }
 
 void Renderer::switchTarget(HWND window) {
-	_deviceContext->OMSetRenderTargets(1U, &renderMaps[windowMap[window]], nullptr);
+	ImGui::SetCurrentContext(graphicsMap[window].context);
+	_deviceContext->OMSetRenderTargets(1U, &graphicsMap[window].target, nullptr);
 }
 
 void Renderer::startFrame() {
@@ -111,37 +100,63 @@ void Renderer::startFrame() {
 	ImGui::NewFrame();
 }
 
-void Renderer::endFrame() {
+void Renderer::endFrame(HWND window) {
 	// End of frame, render and clear buffers 
 	ImGui::Render();
 
 	constexpr float colour[4]{ 0.f,0.f,0.f,0.f };
 
-	for (auto const &it: renderMaps) {
-		_deviceContext->OMSetRenderTargets(1U, &it.second, nullptr);
-		_deviceContext->ClearRenderTargetView(it.second, colour);
-	}
+	_deviceContext->ClearRenderTargetView(graphicsMap[window].target, colour);
 
 	ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
-
-	ImGuiIO& io = ImGui::GetIO();
-
-	// Update and render additional platform windows
-	// TODO error check to see if window exists
-	if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
-		ImGui::UpdatePlatformWindows();
-		ImGui::RenderPlatformWindowsDefault();
-	}
 }
 
-void Renderer::presentFrame() {
-	for (auto const& it : renderMaps) {
-		it.first->Present(0U, 0U);
-	}
+void Renderer::presentFrame(HWND window, UINT sync, UINT flags) {
+	graphicsMap[window].swapChain->Present(sync, flags);
 }
 
-void Renderer::initPlatform(HWND mainWindow) {
-	ImGui_ImplWin32_Init(mainWindow);
+void Renderer::drawOverlay(HWND overlay, const Process &app) {
+	switchTarget(overlay);
+	startFrame();
+
+	const ImGuiIO& io = ImGui::GetIO();
+
+	drawCircle({ 750, 500 }, 16.f, ImColor(1.f, 0.5f, 0.2f));
+	drawText({ 750, 600 }, ImColor(0.f, 1.f, 0.f), std::to_string(Process::created).append(" creations"));
+	drawText({ 750, 650 }, ImColor(1.f, 0.5f, 0.f), std::to_string(Process::copied).append(" copies"));
+	drawText({ 750, 700 }, ImColor(1.f, 0.f, 0.f), std::to_string(Process::deleted).append(" deletions"));
+	drawText({ 750, 750 }, ImColor(0.5f, 0.5f, 0.8f), std::to_string(1.0f / io.DeltaTime).append(" fps"));
+	RECT rect;
+	GetWindowRect(overlay, &rect);
+	ImGui::GetBackgroundDrawList()->AddRect({ 0,0 }, { (float)rect.right - rect.left, (float)rect.bottom - rect.top }, ImColor(0.5f, 0.f, 0.5f),0.f,0,4.f);
+
+	Process::created = 0;
+	Process::copied = 0;
+	Process::deleted = 0;
+
+	bool processFound = app.id != 0;
+
+	if (processFound) {
+		drawText({ 750, 550 }, ImColor(0.f, 1.f, 0.f), "Process Found!");
+	} else {
+		drawText({ 750, 550 }, ImColor(1.f, 0.f, 0.f), "Womp womp woomp!");
+	}
+
+	if (processFound && app.isAlive()) {
+		drawText({ 800, 575 }, ImColor(0.f, 1.f, 0.f), "I AM ALIVE");
+	} else {
+		drawText({ 800, 575 }, ImColor(1.f, 0.f, 0.f), "Dead is I");
+	}
+
+	endFrame(overlay);
+	presentFrame(overlay);
+}
+
+void Renderer::drawEmptyFrame(HWND window) {
+	switchTarget(window);
+	startFrame();
+	endFrame(window);
+	presentFrame(window);
 }
 
 void Renderer::drawText(ImVec2 pos, ImU32 colour, const std::string &text) {
@@ -151,4 +166,13 @@ void Renderer::drawText(ImVec2 pos, ImU32 colour, const std::string &text) {
 
 void Renderer::drawCircle(ImVec2 pos, float radius, ImU32 colour) {
 	ImGui::GetBackgroundDrawList()->AddCircleFilled(pos, radius, colour);
+}
+
+void Renderer::setImGuiContext(HWND window) {
+	ImGui::SetCurrentContext(graphicsMap[window].context);
+}
+
+void Renderer::initContext(HWND hwnd) {
+	ImGui_ImplWin32_Init(hwnd);
+	ImGui_ImplDX11_Init(_device, _deviceContext);
 }

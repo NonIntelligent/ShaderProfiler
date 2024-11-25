@@ -17,8 +17,8 @@
 mono_crash.*
 
 # User Config
-!*.dll
 *.exe
+!QBDI.dll
 
 # Build results
 [Dd]ebug/
