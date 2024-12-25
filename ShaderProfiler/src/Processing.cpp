@@ -1,4 +1,4 @@
-#include "Process.h"
+#include "Processes.h"
 #include "Processing.h"
 #include <algorithm>
 #include <Psapi.h>
@@ -6,6 +6,7 @@
 #include <unordered_set>
 #include <functional>
 #include <list>
+#include <strsafe.h>
 
 void ProcessHandler::scanAllRunningProcesses() {
 	processes.clear();
@@ -57,7 +58,9 @@ HWND findMainWindow(const Process& proc) {
 	return data.window_handle;
 }
 
-bool isD3DCompilerLinked(const Process& proc) {
+bool isDirectXLinked(Process& proc) {
+	if (proc.module != D3dModule::NONE) return true;
+
 	HANDLE handle = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, proc.id);
 	if (!handle) return false;
 
@@ -65,7 +68,8 @@ bool isD3DCompilerLinked(const Process& proc) {
 	DWORD cbNeeded;
 
 	// Can fail if DLLs are being loaded or unloaded
-	BOOL enumerated = EnumProcessModules(handle, hMods, sizeof(HMODULE) * 1024, &cbNeeded);
+	//BOOL enumerated = EnumProcessModules(handle, hMods, sizeof(HMODULE) * 1024, &cbNeeded);
+	BOOL enumerated = EnumProcessModulesEx(handle, hMods, sizeof(HMODULE) * 1024, &cbNeeded, LIST_MODULES_ALL);
 
 	// TODO check if cbNeeded is greater than size of array
 	// if so then resize array and call EnumProcessModules again
@@ -80,23 +84,36 @@ bool isD3DCompilerLinked(const Process& proc) {
 		TCHAR moduleName[MAX_PATH];
 		if (GetModuleFileNameEx(handle, hMods[i], moduleName, sizeof(moduleName) / sizeof(TCHAR))) {
 			std::wstring name = std::wstring(moduleName);
-			if (name.find(L"D3DCompiler_47.dll") != std::string::npos) {
-				foundModule = true; 
-			}
-			if (name.find(L"dxc.dll") != std::string::npos) {
+
+			if (name.find(L"D3DSCache.dll") != std::string::npos) {
 				foundModule = true;
+				proc.module = D3dModule::D3DSCACHE;
+				break;
+			}
+			if (name.find(L"D3DCompiler") != std::string::npos) {
+				foundModule = true;
+				proc.module = D3dModule::D3DCOMPILER;
+				break;
 			}
 			if (name.find(L"dxcompiler.dll") != std::string::npos) {
 				foundModule = true;
+				proc.module = D3dModule::DXCOMPILER;
+				break;
 			}
 			if (name.find(L"d3d12.dll") != std::string::npos) {
 				foundModule = true;
+				proc.module = D3dModule::DIRECTX12;
+				break;
+			}
+			if (name.find(L"d3d11.dll") != std::string::npos) {
+				foundModule = true;
+				proc.module = D3dModule::DIRECTX11;
+				break;
 			}
 		}
 	}
 
-	// Close Handle not necessary
-
+	CloseHandle(handle);
 
 	return foundModule;
 }
@@ -106,15 +123,12 @@ void ProcessHandler::filterProcessList() {
 
 	// Find root id for my process
 	DWORD thisProcessId = GetCurrentProcessId();
-	Process root = getProcess(thisProcessId);
-	Process temp = root;
+	Process root = getProcess(L"explorer.exe");
 
-	while (temp.parentId != 0) {
-		root = temp;
-		temp = getProcess(temp.parentId);
-	}
+	std::sort(processes.begin(), processes.end(), [&](Process a, Process b) {return a.id < b.id; });
 
 	// Add the parents of every process to build a connected map
+	// Does not work with games that start from launchers
 	std::unordered_multimap<DWORD, DWORD> parentMap;
 	for (const Process& proc : processes) {
 		if (proc.parentId != 0) {
@@ -126,6 +140,7 @@ void ProcessHandler::filterProcessList() {
 	std::function<void(DWORD)> visit;
 
 	// visit every parent and their children
+	// every process started from explorer.exe (root) is on the whitelist
 	visit = [&](DWORD root) {
 		whitelist.emplace(root);
 		const std::pair it = parentMap.equal_range(root);
@@ -139,7 +154,7 @@ void ProcessHandler::filterProcessList() {
 	// start from this app
 	visit(root.id);
 
-	std::erase_if(processes, [&](const Process& proc) { return !whitelist.contains(proc.id); });
+	//std::erase_if(processes, [&](const Process& proc) { return !whitelist.contains(proc.id); });
 
 	// erase this application from list and its root
 	std::erase_if(processes, [&](const Process& proc) { return proc.id == thisProcessId || proc.id == root.id; });
@@ -149,7 +164,7 @@ void ProcessHandler::filterProcessList() {
 	std::erase_if(processes, [&](const Process& proc) { return findMainWindow(proc) == nullptr; });
 
 	// Check if they use directx related DLLs
-	//std::erase_if(processes, [&](const Process& proc) { return !isD3DCompilerLinked(proc); });
+	std::erase_if(processes, [&](Process& proc) { return !isDirectXLinked(proc); });
 }
 
 
@@ -175,6 +190,50 @@ Process ProcessHandler::getProcess(unsigned long ID) {
 	}
 
 	return proc;
+}
+
+// https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-getprocaddress
+// Get address of function names for each dll at compile time
+FARPROC ProcessHandler::getFuncAddress(const wchar_t* dllName, const char* funcName) {
+	HMODULE dllModule = GetModuleHandle(dllName);
+
+	bool libraryLoaded = false;
+
+	if (dllModule == NULL) {
+		LoadLibrary(dllName);
+		libraryLoaded = true;
+	}
+
+	if (dllModule == NULL) return nullptr;
+
+	FARPROC ptr = GetProcAddress(dllModule, funcName);
+	/*auto e = GetLastError();
+
+	LPVOID lpMsgBuf;
+	LPVOID lpDisplayBuf;
+
+	FormatMessage(
+		FORMAT_MESSAGE_ALLOCATE_BUFFER |
+		FORMAT_MESSAGE_FROM_SYSTEM |
+		FORMAT_MESSAGE_IGNORE_INSERTS,
+		NULL,
+		e,
+		MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+		(LPTSTR)&lpMsgBuf,
+		0, NULL);
+
+	lpDisplayBuf = (LPVOID)LocalAlloc(LMEM_ZEROINIT,
+									  (lstrlen((LPCTSTR)lpMsgBuf) + lstrlen((LPCTSTR)"GetProcAddress") + 40) * sizeof(TCHAR));
+	StringCchPrintf((LPTSTR)lpDisplayBuf,
+					LocalSize(lpDisplayBuf) / sizeof(TCHAR),
+					TEXT("%s failed with error %d: %s"),
+					"GetProcAddress", e, lpMsgBuf);
+
+	MessageBox(NULL, (LPCTSTR)lpDisplayBuf, L"ERROR", MB_OK);*/
+
+	if (libraryLoaded) FreeLibrary(dllModule);
+
+	return ptr;
 }
 
 bool Process::isAlive() const {

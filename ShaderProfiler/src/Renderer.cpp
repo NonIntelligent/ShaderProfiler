@@ -1,11 +1,10 @@
 #include "Renderer.h"
+#include "Processes.h"
 #include <dxgi.h>
 #include <d3d11.h>
 #include <imgui.h>
 #include <imgui_impl_win32.h>
 #include <imgui_impl_dx11.h>
-
-#include <process.h>
 
 // Features supported
 constexpr D3D_FEATURE_LEVEL levels[2]{

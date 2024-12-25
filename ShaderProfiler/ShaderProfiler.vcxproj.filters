@@ -48,6 +48,12 @@
     <ClCompile Include="src\Renderer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\BinaryInjection.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="external\tinyinst\hook.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Natvis Include="external\imgui\imgui.natvis" />
@@ -62,13 +68,16 @@
     <ClInclude Include="headers\ProfilerWindows.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="headers\Process.h">
+    <ClInclude Include="headers\Processes.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="headers\Renderer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="headers\Graphics.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="headers\BinaryInjection.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
