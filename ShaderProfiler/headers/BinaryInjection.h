@@ -1,8 +1,40 @@
 #pragma once
 #include <TinyInst/hook.h>
 #include <TinyInst/tinyinst.h>
+#undef ERROR
+#include <QBDI.h>
+#define ERROR 0
 #include <thread>
 #include <atomic>
+
+class ProfilerQBDI {
+public:
+	QBDI::GPRState* state = nullptr;
+	uint8_t* fakeStack = nullptr;
+	bool allocatedStack = false;
+
+	static const size_t STACK_SIZE = 0x100000; // 1MB
+
+	size_t iterationCount = 0;
+
+public:
+	void init();
+	void destroy();
+
+	void addInstrumentedModule(QBDI::rword addr);
+	void addInstrumentedModule(QBDI::rword start, QBDI::rword end);
+	void addAddressHitCount(QBDI::rword addr, void* data);
+	void addAddressEntryCB(QBDI::rword addr);
+
+	void removeAllInstrumentation();
+
+private:
+	QBDI::VM* _vm;
+
+private:
+	static QBDI::VMAction countIteration(QBDI::VMInstanceRef vm, QBDI::GPRState* gprState, QBDI::FPRState* fprState, void* data);
+	static QBDI::VMAction printAddressOnEntry(QBDI::VMInstanceRef vm, QBDI::GPRState* gprState, QBDI::FPRState* fprState, void* data);
+};
 
 class ShaderCacheValue : public HookBeginEnd {
 public:

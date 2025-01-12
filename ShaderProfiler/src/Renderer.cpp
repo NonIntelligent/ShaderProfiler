@@ -121,17 +121,10 @@ void Renderer::drawOverlay(HWND overlay, const Process &app) {
 	const ImGuiIO& io = ImGui::GetIO();
 
 	drawCircle({ 750, 500 }, 16.f, ImColor(1.f, 0.5f, 0.2f));
-	drawText({ 750, 600 }, ImColor(0.f, 1.f, 0.f), std::to_string(Process::created).append(" creations"));
-	drawText({ 750, 650 }, ImColor(1.f, 0.5f, 0.f), std::to_string(Process::copied).append(" copies"));
-	drawText({ 750, 700 }, ImColor(1.f, 0.f, 0.f), std::to_string(Process::deleted).append(" deletions"));
 	drawText({ 750, 750 }, ImColor(0.5f, 0.5f, 0.8f), std::to_string(1.0f / io.DeltaTime).append(" fps"));
 	RECT rect;
 	GetWindowRect(overlay, &rect);
 	ImGui::GetBackgroundDrawList()->AddRect({ 0,0 }, { (float)rect.right - rect.left, (float)rect.bottom - rect.top }, ImColor(0.5f, 0.f, 0.5f),0.f,0,4.f);
-
-	Process::created = 0;
-	Process::copied = 0;
-	Process::deleted = 0;
 
 	bool processFound = app.id != 0;
 

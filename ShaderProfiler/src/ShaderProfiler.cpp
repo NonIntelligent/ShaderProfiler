@@ -42,13 +42,13 @@ std::wstring toWstring(const std::string& str) {
 // Setup window config and create instance of window.
 // Main application entry
 INT APIENTRY WinMain(HINSTANCE instance, HINSTANCE, LPSTR cmd_line, INT cmd_show) {
-#if _DEBUG // Open console when in debug mode
+// Open console when in debug mode
 	AllocConsole();
 	FILE* fDummy;
 	freopen_s(&fDummy, "CONIN$", "r", stdin);
 	freopen_s(&fDummy, "CONOUT$", "w", stderr);
 	freopen_s(&fDummy, "CONOUT$", "w", stdout);
-#endif // _DEBUG
+// _DEBUG
 
 	// Create windows and overlay
 	WindowManager windowManager(instance);
@@ -74,11 +74,11 @@ INT APIENTRY WinMain(HINSTANCE instance, HINSTANCE, LPSTR cmd_line, INT cmd_show
 	char instrument_target[] = "D3DSCache.dll";
 	char instrument_module2[] = "-instrument_transitive";
 	char instrument_target2[] = "d3d12.dll";
-	char instrument_module3[] = "-instrument_transitive";
+	char instrument_module3[] = "-instrument_module";
 	char instrument_target3[] = "d3d11on12.dll";
 	char instrument_module4[] = "-instrument_transitive";
-	char instrument_target4[] = "example.exe";
-	char instrument_module5[] = "-instrument_transitive";
+	char instrument_target4[] = "dxgi.dll";
+	char instrument_module5[] = "-instrument_module";
 	char instrument_target5[] = "d3d11.dll";
 	char debug_events[] = "-trace_debug_events";
 	char debug_entries[] = "-trace_module_entries";
@@ -92,6 +92,10 @@ INT APIENTRY WinMain(HINSTANCE instance, HINSTANCE, LPSTR cmd_line, INT cmd_show
 	instrument_module5, instrument_target5,
 	debug_events, debug_entries, debug_unwind };
 	profile.Init(13, line);
+
+	ProfilerQBDI profileQBDI;
+	profileQBDI.init();
+	size_t findValueCalls = 0;
 
 	while (running) {
 		// Send messages to the windows procedure
@@ -133,23 +137,23 @@ INT APIENTRY WinMain(HINSTANCE instance, HINSTANCE, LPSTR cmd_line, INT cmd_show
 		bool processFound = false;
 
 		processHandler.findAppProcesses();
-		Process selectedProcess = processHandler.getProcess(toWstring(current_item));
+		Process selectedProcess = processHandler.getProcessX(toWstring(current_item));
 
 		processFound = selectedProcess.id != 0;
 
 		if (selectedProcess.name != L"default") {
 			// Instrumentation
 			// Currently crashes on second attempt to attach after hangs
-			profile.startProfiling(selectedProcess.id, 1000);
+			//profile.startProfiling(selectedProcess.id, 1000);
 
 			if (killInstrument && profile.isRunning()) {
 				killInstrument = false;
-				profile.stopProfilingAndExit();
+				//profile.stopProfilingAndExit();
 			}
 		}
 
 		comboItems.clear();
-		for (const Process& proc : processHandler.processes) {
+		for (const Process& proc : processHandler.directXProcesses) {
 			comboItems.emplace_back(toString(proc.name));
 		}
 
@@ -175,6 +179,27 @@ INT APIENTRY WinMain(HINSTANCE instance, HINSTANCE, LPSTR cmd_line, INT cmd_show
 			ImGui::EndCombo();
 		}
 
+		if (ImGui::Button("Start Profiling") && selectedProcess.name != L"default") {
+			// Instrument every module
+			for (const ModuleData& modData : selectedProcess.modules) {
+				profileQBDI.addInstrumentedModule(modData.address, modData.address + modData.dataSize);
+
+				if (modData.type == D3dModule::DIRECTX12) {
+					unsigned long long offset = 0x00004180;
+					profileQBDI.addAddressHitCount(modData.address + offset, &findValueCalls);
+					profileQBDI.addAddressEntryCB(0x0);
+					printf("Address hit count applied at %p\n", (void*) (modData.address + offset));
+				}
+			}
+
+
+			for (const ModuleData& entry : selectedProcess.modules) {
+				std::wcout << L"Found module: " << entry.name << " at base address: " << (void*)entry.address << "\n";
+			}
+		}
+
+		ImGui::Text("%zu Calls to ShaderCache_FindValue", findValueCalls);
+
 		ImGui::End();
 
 		renderer.endFrame(mainWindow);
@@ -187,4 +212,6 @@ INT APIENTRY WinMain(HINSTANCE instance, HINSTANCE, LPSTR cmd_line, INT cmd_show
 		}
 
 	}
+
+	profileQBDI.destroy();
 }

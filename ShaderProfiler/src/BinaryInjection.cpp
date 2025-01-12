@@ -1,6 +1,8 @@
 #include "BinaryInjection.h"
 
 #include <iostream>
+#include <functional> // To pass member functions to QBDI callbacks
+#include <iomanip>
 
 // Function to reverse bits of num
 template <typename T>
@@ -169,15 +171,14 @@ void ShaderCacheValue::OnFunctionReturned() {
 	keySizePtrExit = (UINT64*) GetArg(3);
 	keySizePtr2Exit = (INT64*) GetArg(4);
 
-	unsigned char* key = new unsigned char[pKeyReverseExit];
-
+	INT64* value = new INT64;
 
 	if (result == S_OK) {
-		RemoteRead(secondExit, key, pKeyReverseExit);
-		printf("Key is: %s\n", key);
+		RemoteRead(secondExit, value, sizeof(INT64));
+		printf("Key is: %lli \n", (*value));
 	}
 
-	delete[] key;
+	delete value;
 }
 
 void ReadHook::OnFunctionReturned() {
@@ -198,4 +199,86 @@ void ReadHook::OnFunctionReturned() {
 		//RemoteRead(pKey, &key, keySize2);
 		printf("Key is: %llu\n", key);
 	}
+}
+
+QBDI::VMAction showInstruction(QBDI::VM* vm, QBDI::GPRState* gprState, QBDI::FPRState* fprState, void* data) {
+	// Obtain an analysis of the instruction from the VM
+	const QBDI::InstAnalysis* instAnalysis = vm->getInstAnalysis();
+
+	// Printing disassembly
+	std::cout << std::setbase(16) << instAnalysis->address << ": "
+		<< instAnalysis->disassembly << std::endl << std::setbase(10);
+
+	return QBDI::VMAction::CONTINUE;
+}
+
+void ProfilerQBDI::init() {
+	_vm = new QBDI::VM();
+	state = _vm->getGPRState();
+
+	allocatedStack = QBDI::allocateVirtualStack(state, STACK_SIZE, &fakeStack);
+
+	// Trigger callback whenever address range is executed (could be use to track entry into module)
+	//vm.addCodeRangeCB(0x001, 0x002, QBDI::PREINST, ProfilerQBDI::countIteration, &iterationCount);
+}
+
+
+void ProfilerQBDI::destroy() {
+	_vm->removeAllInstrumentedRanges();
+	_vm->clearAllCache();
+	QBDI::alignedFree(fakeStack);
+
+	delete(_vm);
+}
+
+void ProfilerQBDI::addInstrumentedModule(QBDI::rword addr) {
+	// Add address ranges from a remote module
+	bool success = _vm->addInstrumentedModuleFromAddr(addr);
+
+	printf("Module instrumented %d at address %p\n", success, (void*)addr);
+}
+
+void ProfilerQBDI::addInstrumentedModule(QBDI::rword start, QBDI::rword end) {
+	// Add address ranges from a remote module
+	_vm->addInstrumentedRange(start, end);
+
+	printf("Module instrumented at address ranges %p --> %p\n", (void*)start, (void*) end);
+}
+
+void ProfilerQBDI::addAddressHitCount(QBDI::rword addr, void* data) {
+	// Add code address for callback -> look for exact address of remote module
+	uint32_t cid1 = _vm->addCodeAddrCB(addr, QBDI::PREINST, ProfilerQBDI::countIteration, data);
+	uint32_t cid2 = _vm->addCodeCB(QBDI::PREINST, showInstruction, nullptr);
+
+	switch (cid1)
+	{
+	case QBDI::INVALID_EVENTID :
+		printf("Invalid event when adding show Instruction callback\n");
+		break;
+	default:
+		printf("ID of registered callback event %u\n", cid1);
+		printf("ID of registered callback event %u\n", cid2);
+	}
+}
+
+void ProfilerQBDI::addAddressEntryCB(QBDI::rword addr) {
+	_vm->addMnemonicCB("CALL*", QBDI::PREINST, ProfilerQBDI::printAddressOnEntry, nullptr);
+}
+
+void ProfilerQBDI::removeAllInstrumentation() {
+	_vm->removeAllInstrumentedRanges();
+}
+
+QBDI::VMAction ProfilerQBDI::countIteration(QBDI::VMInstanceRef vm, QBDI::GPRState* gprState, QBDI::FPRState* fprState, void* data) {
+	(*((size_t*)data))++;
+
+	return QBDI::CONTINUE;
+}
+
+QBDI::VMAction ProfilerQBDI::printAddressOnEntry(QBDI::VMInstanceRef vm, QBDI::GPRState* gprState, QBDI::FPRState* fprState, void* data) {
+	const QBDI::InstAnalysis* analysis = vm->getInstAnalysis(QBDI::ANALYSIS_INSTRUCTION);
+	
+	printf("Called function from module %s at address %p\n", analysis->moduleName, (void*) analysis->address);
+
+	return QBDI::CONTINUE;
 }
